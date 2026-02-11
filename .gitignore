@@ -1,0 +1,21 @@
+# Node.js
+node_modules/
+dist/
+*.env
+*.log
+
+# Prisma
+prisma/migrations/
+.prisma/
+
+# Angular
+frontend/node_modules/
+frontend/dist/
+
+# Docker
+*.tar
+
+# Kubernetes
+**/configmap.yaml
+**/secret.yaml
+

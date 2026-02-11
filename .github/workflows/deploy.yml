@@ -1,0 +1,155 @@
+name: CI/CD Todo-App (Full Pipeline)
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  ci-cd:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    # ==========================
+    # 1️⃣ Checkout
+    # ==========================
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # ==========================
+    # 2️⃣ Extract branch name
+    # ==========================
+    - name: Get branch name
+      run: echo "BRANCH=${GITHUB_REF##*/}" >> $GITHUB_ENV
+
+    # ==========================
+    # 3️⃣ Backend Tests
+    # ==========================
+    - name: Setup Node.js (Backend)
+      uses: actions/setup-node@v4
+      with:
+        node-version: 18
+
+    - name: Install Backend Dependencies
+      run: |
+        cd backend
+        npm install
+
+    - name: Run Backend Tests
+      run: |
+        cd backend
+        npm test
+
+    # ==========================
+    # 4️⃣ Frontend Tests
+    # ==========================
+    - name: Install Frontend Dependencies
+      run: |
+        cd frontend
+        npm install
+
+    - name: Run Frontend Tests
+      run: |
+        cd frontend
+        npm test -- --watchAll=false
+
+    # ==========================
+    # 5️⃣ Docker Setup
+    # ==========================
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    # ==========================
+    # 6️⃣ Build & Push Backend
+    # ==========================
+    - name: Build & Push Backend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        push: true
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/todo-backend:${{ env.BRANCH }}
+          ${{ secrets.DOCKER_USERNAME }}/todo-backend:${{ github.sha }}
+
+    # ==========================
+    # 7️⃣ Build & Push Frontend
+    # ==========================
+    - name: Build & Push Frontend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        push: true
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/todo-frontend:${{ env.BRANCH }}
+          ${{ secrets.DOCKER_USERNAME }}/todo-frontend:${{ github.sha }}
+
+    # ==========================
+    # 8️⃣ Scan sécurité Docker (Trivy)
+    # ==========================
+    - name: Scan Backend Image
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ secrets.DOCKER_USERNAME }}/todo-backend:${{ env.BRANCH }}
+        format: table
+        exit-code: 1
+        ignore-unfixed: true
+        severity: CRITICAL,HIGH
+
+    # ==========================
+    # 9️⃣ Install kubectl & Minikube
+    # ==========================
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v4
+
+    - name: Install Minikube
+      run: |
+        curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+        sudo install minikube-linux-amd64 /usr/local/bin/minikube
+
+    - name: Start Minikube
+      run: |
+        minikube start --driver=docker --memory=4g --cpus=2
+        minikube addons enable ingress
+
+    # ==========================
+    # 🔟 Deploy Kubernetes
+    # ==========================
+    - name: Deploy Manifests
+      run: kubectl apply -f k8s/
+
+    - name: Update Images
+      run: |
+        kubectl set image deployment/backend backend=${{ secrets.DOCKER_USERNAME }}/todo-backend:${{ env.BRANCH }} -n todo-app
+        kubectl set image deployment/frontend frontend=${{ secrets.DOCKER_USERNAME }}/todo-frontend:${{ env.BRANCH }} -n todo-app
+
+    # ==========================
+    # 1️⃣1️⃣ Wait for rollout
+    # ==========================
+    - name: Wait for Deployments
+      run: |
+        kubectl rollout status deployment/backend -n todo-app
+        kubectl rollout status deployment/frontend -n todo-app
+
+    # ==========================
+    # 1️⃣2️⃣ Verification Pods
+    # ==========================
+    - name: Check Pods Status
+      run: kubectl get pods -n todo-app
+
+    # ==========================
+    # 1️⃣3️⃣ Backend Health Check
+    # ==========================
+    - name: Test Backend API
+      run: |
+        kubectl run testpod --rm -i --tty \
+          --image=busybox \
+          --namespace=todo-app \
+          -- sh -c "wget -qO- http://backend:3000/health"

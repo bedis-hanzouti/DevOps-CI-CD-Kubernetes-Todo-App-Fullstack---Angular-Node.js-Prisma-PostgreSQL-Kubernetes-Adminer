@@ -1,0 +1,48 @@
+<div class="todo-container">
+  <h2>📝 Todo App</h2>
+
+  <!-- Add -->
+  <div class="todo-input">
+    <input [(ngModel)]="title" placeholder="Ajouter une tâche..." (keyup.enter)="add()" />
+    <button (click)="add()">+</button>
+  </div>
+
+  <!-- List -->
+  <ul>
+    <li *ngFor="let t of todos" [class.done]="t.completed">
+      <label>
+        <input type="checkbox" [(ngModel)]="t.completed" (change)="toggle(t)" />
+
+        <!-- View / Edit -->
+        <span *ngIf="editId !== t.id">{{ t.title }}</span>
+        <input *ngIf="editId === t.id" [(ngModel)]="editTitle" class="edit-input" />
+      </label>
+
+      <!-- Actions -->
+      <div class="actions">
+        <button class="view" (click)="showDetails(t)">👁</button>
+
+        <button class="edit" *ngIf="editId !== t.id" (click)="startEdit(t)">
+          ✏️
+        </button>
+
+        <button class="save" *ngIf="editId === t.id" (click)="update(t)">
+          💾
+        </button>
+
+        <button class="delete" (click)="remove(t.id)">✖</button>
+      </div>
+    </li>
+  </ul>
+
+  <!-- Details -->
+  <div class="details" *ngIf="selectedTodo">
+    <h3>📌 Détails</h3>
+    <p><strong>Titre :</strong> {{ selectedTodo.title }}</p>
+    <p>
+      <strong>Statut :</strong>
+      {{ selectedTodo.completed ? 'Terminée ✅' : 'En cours ⏳' }}
+    </p>
+    <button (click)="selectedTodo = null">Fermer</button>
+  </div>
+</div>
