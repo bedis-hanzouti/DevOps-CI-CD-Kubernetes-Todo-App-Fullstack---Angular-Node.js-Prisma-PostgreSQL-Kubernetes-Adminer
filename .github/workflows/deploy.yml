@@ -1,7 +1,6 @@
-
-
 name: CI/CD Todo-App (Minikube Docker Driver)
 
+# Déclencheurs du workflow
 on:
   push:
     branches:
@@ -12,80 +11,64 @@ on:
 
 jobs:
   ci-cd:
-    name: Build, Push, Deploy & Test
+    name: Build, Deploy & Test on Minikube (Docker Driver)
     runs-on: ubuntu-latest
 
     steps:
+      # ==========================
       # 1️⃣ Checkout repository
+      # ==========================
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2️⃣ Set up Docker Buildx
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # 3️⃣ Login to Docker Hub
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      # 4️⃣ Build & Push Backend
-      - name: Build and Push Backend
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/backend-api:${{ github.sha }}
-            ${{ secrets.DOCKER_USERNAME }}/backend-api:latest
-
-      # 5️⃣ Build & Push Frontend
-      - name: Build and Push Frontend
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/frontend:${{ github.sha }}
-            ${{ secrets.DOCKER_USERNAME }}/frontend:latest
-
-      # 6️⃣ Install kubectl
+      # ==========================
+      # 2️⃣ Installer kubectl et Minikube
+      # ==========================
       - name: Install kubectl
         run: |
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/
 
-      # 7️⃣ Install Minikube
       - name: Install Minikube
         run: |
           curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
           sudo install minikube-linux-amd64 /usr/local/bin/minikube
 
-      # 8️⃣ Start Minikube
+      # ==========================
+      # 3️⃣ Start Minikube (Docker driver)
+      # ==========================
       - name: Start Minikube
         run: |
           minikube start --driver=docker --memory=4g --cpus=2
           minikube status
 
-      # 9️⃣ Update Kubernetes image tags
-      - name: Update Kubernetes Images
+      # ==========================
+      # 4️⃣ Configurer Docker pour Minikube
+      # ==========================
+      - name: Use Minikube Docker Daemon
         run: |
-          sed -i "s|backend-api:latest|${{ secrets.DOCKER_USERNAME }}/backend-api:${{ github.sha }}|g" k8s/backend/backend-deployment.yaml
-          sed -i "s|frontend:latest|${{ secrets.DOCKER_USERNAME }}/frontend:${{ github.sha }}|g" k8s/frontend/frontend-deployment.yaml
+          eval $(minikube -p minikube docker-env)
+          docker info
 
-      # 🔟 Deploy Kubernetes Resources
+      # ==========================
+      # 5️⃣ Build Docker images dans Minikube
+      # ==========================
+      - name: Build Backend Docker Image
+        run: docker build -t backend-api:latest ./backend
+
+      - name: Build Frontend Docker Image
+        run: docker build -t frontend:latest ./frontend
+
+      # ==========================
+      # 6️⃣ Déployer Kubernetes avec secrets dynamiques
+      # ==========================
       - name: Deploy Kubernetes Resources
         run: |
-          # Create namespace
+          # 🔹 Namespace
           kubectl apply -f k8s/namespace.yaml
 
-          # ✅ Ensure default ServiceAccount exists
-          kubectl create serviceaccount default -n todo-app --dry-run=client -o yaml | kubectl apply -f -
-
-          # Secrets & ConfigMaps
+          # 🔹 Secret PostgreSQL depuis GitHub Secrets
           kubectl create secret generic postgres-secret \
             --from-literal=POSTGRES_USER=${{ secrets.POSTGRES_USER }} \
             --from-literal=POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }} \
@@ -93,6 +76,7 @@ jobs:
             --from-literal=DATABASE_URL=postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@${{ secrets.DATABASE_HOST }}:${{ secrets.DATABASE_PORT }}/${{ secrets.POSTGRES_DB }} \
             -n todo-app --dry-run=client -o yaml | kubectl apply -f -
 
+          # 🔹 ConfigMap backend depuis GitHub Secrets
           kubectl create configmap backend-config \
             --from-literal=PORT=${{ secrets.BACKEND_PORT }} \
             --from-literal=DATABASE_HOST=${{ secrets.DATABASE_HOST }} \
@@ -101,38 +85,43 @@ jobs:
             --from-literal=POSTGRES_DB=${{ secrets.POSTGRES_DB }} \
             -n todo-app --dry-run=client -o yaml | kubectl apply -f -
 
-          # Postgres
+          # 🔹 Déployer PostgreSQL (PVC + Deployment + Service)
           kubectl apply -f k8s/postgres/postgres-pvc.yaml
           kubectl apply -f k8s/postgres/postgres-deployment.yaml
           kubectl apply -f k8s/postgres/postgres-service.yaml
 
-          # Backend & Frontend
+          # 🔹 Déployer Backend / Frontend / Adminer
           kubectl apply -f k8s/backend/backend-deployment.yaml
           kubectl apply -f k8s/backend/backend-service.yaml
           kubectl apply -f k8s/frontend/frontend-deployment.yaml
           kubectl apply -f k8s/frontend/frontend-service.yaml
-
-          # Adminer
           kubectl apply -f k8s/adminer/adminer-deployment.yaml
           kubectl apply -f k8s/adminer/adminer-service.yaml
 
-          # Ingress
+          # 🔹 Déployer Ingress
           kubectl apply -f k8s/ingress.yaml
 
-      # 1️⃣1️⃣ Check resources
+      # ==========================
+      # 7️⃣ Redémarrer le Backend pour prendre la nouvelle image
+      # ==========================
+      - name: Restart Backend Deployment
+        run: kubectl rollout restart deployment/backend -n todo-app
+
+      # ==========================
+      # 8️⃣ Vérification rapide
+      # ==========================
       - name: Check Pods, Services & Ingress
         run: |
           kubectl get pods -n todo-app
           kubectl get svc -n todo-app
           kubectl get ingress -n todo-app
 
-      # 1️⃣5️⃣ Test rapide Backend API
+      # ==========================
+      # 9️⃣ Test rapide Backend API
+      # ==========================
       - name: Test Backend
         run: |
           kubectl run testpod --rm -it --image=busybox --namespace=todo-app -- sh -c "wget -qO- http://backend:3000/health || echo 'Backend not ready yet'"
-
-
-
 
 
 
