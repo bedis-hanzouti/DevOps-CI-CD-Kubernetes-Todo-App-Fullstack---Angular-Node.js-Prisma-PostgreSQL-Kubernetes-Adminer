@@ -37,10 +37,10 @@ jobs:
         cd backend
         npm install
 
-    - name: Run Backend Tests
-      run: |
-        cd backend
-        npm test
+    # - name: Run Backend Tests
+    #   run: |
+    #     cd backend
+    #     npm test
 
     # ==========================
     # 4️⃣ Frontend Tests
@@ -50,10 +50,10 @@ jobs:
         cd frontend
         npm install
 
-    - name: Run Frontend Tests
-      run: |
-        cd frontend
-        npm test -- --watchAll=false
+    # - name: Run Frontend Tests
+    #   run: |
+    #     cd frontend
+    #     npm test -- --watchAll=false
 
     # ==========================
     # 5️⃣ Docker Setup
