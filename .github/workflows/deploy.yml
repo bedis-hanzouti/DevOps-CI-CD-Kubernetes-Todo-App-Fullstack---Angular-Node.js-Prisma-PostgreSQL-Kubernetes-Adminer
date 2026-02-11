@@ -127,11 +127,24 @@ jobs:
           kubectl apply -f k8s/adminer/adminer-deployment.yaml
           kubectl apply -f k8s/adminer/adminer-service.yaml
 
-          # Ingress
-          kubectl apply -f k8s/ingress.yaml
+      # ==========================
+      # 🔟 Attendre que le Ingress Controller soit ready
+      # ==========================
+      - name: Wait for Ingress Controller
+        run: |
+          kubectl wait --namespace=ingress-nginx \
+            --for=condition=ready pod \
+            -l app.kubernetes.io/component=controller \
+            --timeout=120s
 
       # ==========================
-      # 🔟 Wait for pods ready
+      # 1️⃣1️⃣ Déployer Ingress
+      # ==========================
+      - name: Apply Ingress
+        run: kubectl apply -f k8s/ingress.yaml
+
+      # ==========================
+      # 1️⃣2️⃣ Attendre que tous les pods soient ready
       # ==========================
       - name: Wait for pods ready
         run: |
@@ -141,7 +154,7 @@ jobs:
           kubectl wait --for=condition=ready pod -l app=adminer -n todo-app --timeout=120s
 
       # ==========================
-      # 1️⃣1️⃣ Vérification rapide
+      # 1️⃣3️⃣ Vérification rapide
       # ==========================
       - name: Check Pods, Services & Ingress
         run: |
@@ -150,12 +163,11 @@ jobs:
           kubectl get ingress -n todo-app
 
       # ==========================
-      # 1️⃣2️⃣ Test Backend API
+      # 1️⃣4️⃣ Test Backend API
       # ==========================
       - name: Test Backend
         run: |
           kubectl run testpod --rm -i --image=busybox --namespace=todo-app -- sh -c "wget -qO- http://backend:3000/health || echo 'Backend not ready'"
-
 
 
 
