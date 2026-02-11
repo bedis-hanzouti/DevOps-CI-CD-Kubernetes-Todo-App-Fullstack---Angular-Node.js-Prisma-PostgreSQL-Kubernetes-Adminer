@@ -140,7 +140,7 @@ jobs:
           kubectl get ingress -n todo-app
 
       # ==========================
-      # 1️⃣2️⃣ Test Backend API
+      # 1️⃣5️⃣ Test rapide Backend API
       # ==========================
       - name: Test Backend
         run: |
