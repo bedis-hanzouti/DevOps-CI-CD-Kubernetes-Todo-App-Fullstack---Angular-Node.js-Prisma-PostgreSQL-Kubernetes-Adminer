@@ -86,13 +86,11 @@ jobs:
           minikube status
 
       # ==========================
-      # 8️⃣ Deploy Kubernetes Resources
+      # 8️⃣ Deploy Kubernetes
       # ==========================
       - name: Deploy Kubernetes
         run: |
           kubectl apply -f k8s/namespace.yaml
-
-          # 🔹 Assurer que le serviceaccount default existe
           kubectl create serviceaccount default -n todo-app || true
 
           kubectl create secret generic postgres-secret \
@@ -103,11 +101,7 @@ jobs:
             -n todo-app --dry-run=client -o yaml | kubectl apply -f -
 
           kubectl create configmap backend-config \
-            --from-literal=PORT=${{ secrets.BACKEND_PORT }} \
-            --from-literal=DATABASE_HOST=${{ secrets.DATABASE_HOST }} \
-            --from-literal=DATABASE_PORT=${{ secrets.DATABASE_PORT }} \
-            --from-literal=POSTGRES_USER=${{ secrets.POSTGRES_USER }} \
-            --from-literal=POSTGRES_DB=${{ secrets.POSTGRES_DB }} \
+            --from-literal=PORT=3000 \
             -n todo-app --dry-run=client -o yaml | kubectl apply -f -
 
           kubectl apply -f k8s/postgres/
@@ -122,37 +116,51 @@ jobs:
       - name: Update Deployment Images
         run: |
           kubectl set image deployment/backend \
-            backend=${{ secrets.DOCKER_USERNAME }}/backend-api:${{ env.IMAGE_TAG }} -n todo-app
+            backend=${{ secrets.DOCKER_USERNAME }}/backend-api:${{ env.IMAGE_TAG }} \
+            -n todo-app
 
           kubectl set image deployment/frontend \
-            frontend=${{ secrets.DOCKER_USERNAME }}/frontend:${{ env.IMAGE_TAG }} -n todo-app
+            frontend=${{ secrets.DOCKER_USERNAME }}/frontend:${{ env.IMAGE_TAG }} \
+            -n todo-app
 
       # ==========================
-      # 🔟 Wait for Deployments
+      # 🔟 Wait for Rollout
       # ==========================
-      - name: Wait for Backend & Frontend
+      - name: Wait for Deployments
         run: |
           kubectl rollout status deployment/backend -n todo-app --timeout=180s
           kubectl rollout status deployment/frontend -n todo-app --timeout=180s
 
       # ==========================
-      # 1️⃣1️⃣ Check Resources
+      # 1️⃣1️⃣ Wait Pod Ready
       # ==========================
-      - name: Check Resources
+      - name: Wait Backend Pod Ready
         run: |
-          kubectl get pods -n todo-app
-          kubectl get svc -n todo-app
-          kubectl get ingress -n todo-app
+          kubectl wait --for=condition=ready pod \
+            -l app=backend \
+            -n todo-app \
+            --timeout=180s
 
       # ==========================
-      # 1️⃣2️⃣ Test Backend Health
+      # 1️⃣2️⃣ Test Backend via Service
       # ==========================
       - name: Test Backend
         run: |
-          kubectl exec -n todo-app deploy/backend -- \
-            wget -qO- http://localhost:3000/health
+          kubectl run curltest \
+            --rm -i --restart=Never \
+            --image=busybox \
+            -n todo-app -- \
+            sh -c "wget -qO- http://backend:3000/health"
 
-
+      # ==========================
+      # 1️⃣3️⃣ Debug (only if failure)
+      # ==========================
+      - name: Debug on Failure
+        if: failure()
+        run: |
+          kubectl get pods -n todo-app
+          kubectl describe pod -l app=backend -n todo-app
+          kubectl logs -l app=backend -n todo-app
 
 
 
