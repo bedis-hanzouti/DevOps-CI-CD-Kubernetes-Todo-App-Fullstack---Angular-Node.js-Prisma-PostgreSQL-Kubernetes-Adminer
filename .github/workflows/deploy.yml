@@ -1,5 +1,3 @@
-
-
 name: CI/CD Todo-App (Minikube Docker Driver)
 
 on:
@@ -94,6 +92,9 @@ jobs:
         run: |
           kubectl apply -f k8s/namespace.yaml
 
+          # 🔹 Assurer que le serviceaccount default existe
+          kubectl create serviceaccount default -n todo-app || true
+
           kubectl create secret generic postgres-secret \
             --from-literal=POSTGRES_USER=${{ secrets.POSTGRES_USER }} \
             --from-literal=POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }} \
@@ -127,7 +128,15 @@ jobs:
             frontend=${{ secrets.DOCKER_USERNAME }}/frontend:${{ env.IMAGE_TAG }} -n todo-app
 
       # ==========================
-      # 🔟 Verify Deployment
+      # 🔟 Wait for Deployments
+      # ==========================
+      - name: Wait for Backend & Frontend
+        run: |
+          kubectl rollout status deployment/backend -n todo-app --timeout=180s
+          kubectl rollout status deployment/frontend -n todo-app --timeout=180s
+
+      # ==========================
+      # 1️⃣1️⃣ Check Resources
       # ==========================
       - name: Check Resources
         run: |
@@ -136,14 +145,12 @@ jobs:
           kubectl get ingress -n todo-app
 
       # ==========================
-      # 1️⃣1️⃣ Test Backend
+      # 1️⃣2️⃣ Test Backend Health
       # ==========================
       - name: Test Backend
         run: |
-          kubectl run testpod --rm -i --tty \
-            --image=busybox \
-            --namespace=todo-app \
-            -- sh -c "wget -qO- http://backend:3000/health || echo 'Backend not ready yet'"
+          kubectl exec -n todo-app deploy/backend -- \
+            wget -qO- http://localhost:3000/health
 
 
 
