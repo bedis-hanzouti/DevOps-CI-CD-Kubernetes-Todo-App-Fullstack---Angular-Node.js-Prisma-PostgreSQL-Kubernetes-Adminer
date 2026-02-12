@@ -2,7 +2,6 @@
 
 name: CI/CD Todo-App (Minikube Docker Driver)
 
-# Déclencheur du workflow
 on:
   push:
     branches:
@@ -13,7 +12,7 @@ on:
 
 jobs:
   ci-cd:
-    name: Build, Deploy & Test on Minikube (Docker Driver)
+    name: Build, Push, Deploy & Test
     runs-on: ubuntu-latest
 
     steps:
@@ -24,7 +23,50 @@ jobs:
         uses: actions/checkout@v3
 
       # ==========================
-      # 2️⃣ Installer kubectl et Minikube
+      # 2️⃣ Set Image Tag (SHA court)
+      # ==========================
+      - name: Set Image Tag
+        run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      # ==========================
+      # 3️⃣ Login Docker Hub
+      # ==========================
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # ==========================
+      # 4️⃣ Build Docker Images
+      # ==========================
+      - name: Build Backend Image
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/backend-api:${{ env.IMAGE_TAG }} ./backend
+          docker tag ${{ secrets.DOCKER_USERNAME }}/backend-api:${{ env.IMAGE_TAG }} \
+                     ${{ secrets.DOCKER_USERNAME }}/backend-api:latest
+
+      - name: Build Frontend Image
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/frontend:${{ env.IMAGE_TAG }} ./frontend
+          docker tag ${{ secrets.DOCKER_USERNAME }}/frontend:${{ env.IMAGE_TAG }} \
+                     ${{ secrets.DOCKER_USERNAME }}/frontend:latest
+
+      # ==========================
+      # 5️⃣ Push Docker Images
+      # ==========================
+      - name: Push Backend Image
+        run: |
+          docker push ${{ secrets.DOCKER_USERNAME }}/backend-api:${{ env.IMAGE_TAG }}
+          docker push ${{ secrets.DOCKER_USERNAME }}/backend-api:latest
+
+      - name: Push Frontend Image
+        run: |
+          docker push ${{ secrets.DOCKER_USERNAME }}/frontend:${{ env.IMAGE_TAG }}
+          docker push ${{ secrets.DOCKER_USERNAME }}/frontend:latest
+
+      # ==========================
+      # 6️⃣ Installer kubectl et Minikube
       # ==========================
       - name: Install kubectl
         run: |
@@ -38,7 +80,7 @@ jobs:
           sudo install minikube-linux-amd64 /usr/local/bin/minikube
 
       # ==========================
-      # 3️⃣ Start Minikube (Docker driver)
+      # 7️⃣ Start Minikube
       # ==========================
       - name: Start Minikube
         run: |
@@ -46,31 +88,12 @@ jobs:
           minikube status
 
       # ==========================
-      # 4️⃣ Configurer Docker pour Minikube
+      # 8️⃣ Deploy Kubernetes Resources
       # ==========================
-      - name: Use Minikube Docker Daemon
+      - name: Deploy Kubernetes
         run: |
-          eval $(minikube -p minikube docker-env)
-          docker info
-
-      # ==========================
-      # 5️⃣ Build Docker images dans Minikube
-      # ==========================
-      - name: Build Backend Docker Image
-        run: docker build -t backend-api:latest ./backend
-
-      - name: Build Frontend Docker Image
-        run: docker build -t frontend:latest ./frontend
-
-      # ==========================
-      # 6️⃣ Déployer Kubernetes avec secrets dynamiques
-      # ==========================
-      - name: Deploy Kubernetes Resources
-        run: |
-          # 🔹 Namespace
           kubectl apply -f k8s/namespace.yaml
 
-          # 🔹 Secret PostgreSQL depuis GitHub Secrets
           kubectl create secret generic postgres-secret \
             --from-literal=POSTGRES_USER=${{ secrets.POSTGRES_USER }} \
             --from-literal=POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }} \
@@ -78,7 +101,6 @@ jobs:
             --from-literal=DATABASE_URL=postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@${{ secrets.DATABASE_HOST }}:${{ secrets.DATABASE_PORT }}/${{ secrets.POSTGRES_DB }} \
             -n todo-app --dry-run=client -o yaml | kubectl apply -f -
 
-          # 🔹 ConfigMap backend depuis GitHub Secrets
           kubectl create configmap backend-config \
             --from-literal=PORT=${{ secrets.BACKEND_PORT }} \
             --from-literal=DATABASE_HOST=${{ secrets.DATABASE_HOST }} \
@@ -87,44 +109,41 @@ jobs:
             --from-literal=POSTGRES_DB=${{ secrets.POSTGRES_DB }} \
             -n todo-app --dry-run=client -o yaml | kubectl apply -f -
 
-          # 🔹 Déployer PostgreSQL (PVC + Deployment + Service)
-          
-          kubectl apply -f k8s/postgres/postgres-pvc.yaml
-          kubectl apply -f k8s/postgres/postgres-deployment.yaml
-          kubectl apply -f k8s/postgres/postgres-service.yaml
-
-          # 🔹 Déployer Backend / Frontend / Adminer
-          kubectl apply -f k8s/backend/backend-deployment.yaml
-          kubectl apply -f k8s/backend/backend-service.yaml
-          kubectl apply -f k8s/frontend/frontend-deployment.yaml
-          kubectl apply -f k8s/frontend/frontend-service.yaml
-          kubectl apply -f k8s/adminer/adminer-deployment.yaml
-          kubectl apply -f k8s/adminer/adminer-service.yaml
-
-          # 🔹 Déployer Ingress
+          kubectl apply -f k8s/postgres/
+          kubectl apply -f k8s/backend/
+          kubectl apply -f k8s/frontend/
+          kubectl apply -f k8s/adminer/
           kubectl apply -f k8s/ingress.yaml
 
       # ==========================
-      # 7️⃣ Redémarrer le Backend pour prendre la nouvelle image
+      # 9️⃣ Update Deployment Images
       # ==========================
-      - name: Restart Backend Deployment
-        run: kubectl rollout restart deployment/backend -n todo-app
+      - name: Update Deployment Images
+        run: |
+          kubectl set image deployment/backend \
+            backend=${{ secrets.DOCKER_USERNAME }}/backend-api:${{ env.IMAGE_TAG }} -n todo-app
+
+          kubectl set image deployment/frontend \
+            frontend=${{ secrets.DOCKER_USERNAME }}/frontend:${{ env.IMAGE_TAG }} -n todo-app
 
       # ==========================
-      # 8️⃣ Vérification rapide
+      # 🔟 Verify Deployment
       # ==========================
-      - name: Check Pods, Services & Ingress
+      - name: Check Resources
         run: |
           kubectl get pods -n todo-app
           kubectl get svc -n todo-app
           kubectl get ingress -n todo-app
 
       # ==========================
-      # 9️⃣ Test rapide Backend API
+      # 1️⃣1️⃣ Test Backend
       # ==========================
       - name: Test Backend
         run: |
-          kubectl run testpod --rm -it --image=busybox --namespace=todo-app -- sh -c "wget -qO- http://backend:3000/health || echo 'Backend not ready yet'"
+          kubectl run testpod --rm -i --tty \
+            --image=busybox \
+            --namespace=todo-app \
+            -- sh -c "wget -qO- http://backend:3000/health || echo 'Backend not ready yet'"
 
 
 
