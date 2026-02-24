@@ -1,9 +1,13 @@
 <div class="todo-container">
-  <h2>📝 Todo App</h2>
+  <h2>📝 Todo App V2</h2>
 
   <!-- Add -->
   <div class="todo-input">
-    <input [(ngModel)]="title" placeholder="Ajouter une tâche..." (keyup.enter)="add()" />
+    <input
+      [(ngModel)]="title"
+      placeholder="Ajouter une tâche..."
+      (keyup.enter)="add()"
+    />
     <button (click)="add()">+</button>
   </div>
 
@@ -15,7 +19,11 @@
 
         <!-- View / Edit -->
         <span *ngIf="editId !== t.id">{{ t.title }}</span>
-        <input *ngIf="editId === t.id" [(ngModel)]="editTitle" class="edit-input" />
+        <input
+          *ngIf="editId === t.id"
+          [(ngModel)]="editTitle"
+          class="edit-input"
+        />
       </label>
 
       <!-- Actions -->
@@ -41,7 +49,7 @@
     <p><strong>Titre :</strong> {{ selectedTodo.title }}</p>
     <p>
       <strong>Statut :</strong>
-      {{ selectedTodo.completed ? 'Terminée ✅' : 'En cours ⏳' }}
+      {{ selectedTodo.completed ? "Terminée ✅" : "En cours ⏳" }}
     </p>
     <button (click)="selectedTodo = null">Fermer</button>
   </div>
